@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="theme-color" content="#000000"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="MNEMO//SYS"/>
+<title>MNEMO//SYS 1.0</title>
+<link rel="manifest" href="manifest.json"/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg:     #000000;
+  --panel:  #020a02;
+  --border: #00ff41;
+  --dim:    #005514;
+  --muted:  #001a00;
+  --bright: #39ff14;
+  --text:   #00ff41;
+  --dimtxt: #005514;
+  --red:    #ff0000;
+  --amber:  #ffaa00;
+  --gold:   #ffd700;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%; background: var(--bg);
+  color: var(--text); font-family: 'Share Tech Mono', monospace;
+  overflow: hidden; -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* Scanlines */
+body::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+  background: repeating-linear-gradient(0deg, transparent, transparent 3px,
+    rgba(0,0,0,0.13) 3px, rgba(0,0,0,0.13) 4px);
+}
+
+/* Phosphor flicker */
+@keyframes hum {
+  0%,100%{ opacity:1; }
+  92%    { opacity:0.97; }
+  94%    { opacity:1; }
+  96%    { opacity:0.98; }
+}
+@keyframes glow-pulse {
+  0%,100%{ text-shadow: 0 0 6px var(--border), 0 0 18px var(--border); }
+  50%    { text-shadow: 0 0 10px var(--border), 0 0 30px var(--border), 0 0 50px var(--border); }
+}
+@keyframes blink { 50%{ opacity:0; } }
+@keyframes flip-out { 0%{ transform:rotateY(0deg); } 100%{ transform:rotateY(-90deg); } }
+@keyframes flip-in  { 0%{ transform:rotateY(90deg); } 100%{ transform:rotateY(0deg); } }
+@keyframes slideUp  { from{ opacity:0; transform:translateY(20px); } to{ opacity:1; transform:translateY(0); } }
+@keyframes correct  { 0%,100%{ border-color:var(--border); } 50%{ border-color:var(--bright); box-shadow:0 0 20px var(--bright); } }
+@keyframes wrong    { 0%,100%{ border-color:var(--border); } 50%{ border-color:var(--red); box-shadow:0 0 20px var(--red); } }
+
+body { animation: hum 8s infinite; }
+
+/* ── Layout ──────────────────────────────────────────── */
+#app {
+  display: flex; flex-direction: column;
+  height: 100dvh; max-width: 480px; margin: 0 auto;
+}
+
+/* ── Header ──────────────────────────────────────────── */
+header {
+  border: 1px solid var(--border); border-top: none;
+  background: var(--bg); padding: 10px 14px 8px; flex-shrink: 0;
+  box-shadow: 0 0 20px rgba(0,255,65,0.2), inset 0 0 30px rgba(0,255,65,0.03);
+}
+.logo {
+  font-family: 'VT323', monospace; font-size: 28px;
+  color: var(--border); animation: glow-pulse 3s infinite;
+}
+.logo span { color: var(--red); }
+.logo-sub { font-size: 9px; color: var(--dimtxt); letter-spacing: 2px; }
+.hdr-row { display: flex; justify-content: space-between; align-items: flex-start; }
+#clock { font-family: 'VT323', monospace; font-size: 22px; color: var(--gold); text-align:right; line-height:1; }
+#dateline { font-size: 8px; color: var(--dimtxt); text-align:right; }
+
+/* Progress bar */
+.prog-wrap { margin-top: 8px; }
+.prog-label { font-size: 8px; color: var(--dimtxt); letter-spacing:1px; display:flex; justify-content:space-between; margin-bottom:3px; }
+.prog-track { height: 5px; background: var(--muted); }
+.prog-fill  { height:100%; background: var(--border); transition: width .4s; box-shadow: 0 0 6px var(--border); }
+
+/* ── Nav tabs ─────────────────────────────────────────── */
+.tabs {
+  display: flex; background: var(--panel);
+  border-bottom: 1px solid var(--dim); flex-shrink: 0;
+}
+.tab {
+  flex:1; padding:8px 4px; text-align:center;
+  font-size:10px; letter-spacing:1px; color:var(--dimtxt);
+  border:none; background:none; cursor:pointer; font-family:'Share Tech Mono',monospace;
+  border-bottom: 2px solid transparent; transition: color .2s, border-color .2s;
+}
+.tab.active { color:var(--border); border-bottom-color:var(--border); }
+
+/* ── Panels ──────────────────────────────────────────── */
+.panel { flex:1; overflow-y:auto; display:none; flex-direction:column; }
+.panel.active { display:flex; }
+.panel::-webkit-scrollbar { width:3px; }
+.panel::-webkit-scrollbar-thumb { background:var(--dim); }
+
+/* ── STUDY panel ─────────────────────────────────────── */
+#panel-study { padding: 12px 12px 82px 12px; gap: 10px; }
+
+.deck-selector {
+  display: flex; gap: 8px; align-items: center;
+  padding: 6px 0;
+}
+.deck-selector select {
+  flex:1; background:var(--bg); color:var(--text);
+  border:1px solid var(--dim); font-family:'Share Tech Mono',monospace;
+  font-size:12px; padding:6px 8px; outline:none;
+}
+.deck-selector select:focus { border-color:var(--border); }
+
+/* Card */
+.card-area {
+  flex:1; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:12px;
+  min-height: 280px;
+}
+.card-wrap {
+  width:100%; perspective:1000px;
+}
+.card {
+  width:100%; min-height: 220px;
+  background: var(--panel); border:1px solid var(--border);
+  box-shadow: 0 0 16px rgba(0,255,65,0.2), inset 0 0 20px rgba(0,255,65,0.03);
+  display:flex; flex-direction:column; align-items:center;
+  justify-content:center; padding:24px 20px; cursor:pointer;
+  position:relative; text-align:center;
+}
+.card.flip-out { animation: flip-out 0.15s ease-in forwards; }
+.card.flip-in  { animation: flip-in  0.15s ease-out forwards; }
+.card.correct-flash { animation: correct 0.5s ease; }
+.card.wrong-flash   { animation: wrong   0.5s ease; }
+
+.card-side {
+  font-size: 8px; letter-spacing:2px; color:var(--dimtxt);
+  margin-bottom:12px; text-transform:uppercase;
+}
+.card-content {
+  font-family:'VT323',monospace; font-size:28px;
+  color:var(--text); line-height:1.3; word-break:break-word;
+  text-shadow: 0 0 8px var(--border);
+}
+.card-hint {
+  position:absolute; bottom:10px; right:12px;
+  font-size:8px; color:var(--dimtxt); letter-spacing:1px;
+}
+.card-counter {
+  font-size:10px; color:var(--dimtxt); text-align:center;
+}
+
+/* Study buttons */
+.study-btns {
+  display:flex; gap:8px; width:100%;
+  flex-shrink:0;
+}
+.study-btn {
+  flex:1; padding:12px 4px; text-align:center;
+  font-family:'Share Tech Mono',monospace; font-size:12px;
+  border:1px solid; background:none; cursor:pointer;
+  transition:all .15s; letter-spacing:1px;
+}
+.btn-flip   { border-color:var(--border); color:var(--border); }
+.btn-knew   { border-color:var(--bright); color:var(--bright); }
+.btn-missed { border-color:var(--red);    color:var(--red);    }
+.study-btn:active { opacity:.7; }
+.btn-flip:active   { background:var(--border);  color:var(--bg); }
+.btn-knew:active   { background:var(--bright);  color:var(--bg); }
+.btn-missed:active { background:var(--red);      color:var(--bg); }
+
+/* Session stats */
+.session-stats {
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  gap:6px; padding: 4px 0;
+}
+.stat-box {
+  background:var(--panel); border:1px solid var(--dim);
+  padding:8px 4px; text-align:center;
+}
+.stat-label { font-size:8px; color:var(--dimtxt); letter-spacing:1px; margin-bottom:2px; }
+.stat-val   { font-family:'VT323',monospace; font-size:22px; color:var(--text); }
+.stat-val.green { color:var(--bright); }
+.stat-val.red   { color:var(--red);    }
+.stat-val.amber { color:var(--amber);  }
+
+/* Complete screen */
+.complete-screen {
+  display:none; flex-direction:column; align-items:center;
+  justify-content:center; flex:1; gap:16px; padding:20px; text-align:center;
+}
+.complete-screen.show { display:flex; }
+.complete-big { font-family:'VT323',monospace; font-size:72px; color:var(--bright); animation: glow-pulse 2s infinite; }
+.complete-sub { font-size:12px; color:var(--dimtxt); }
+
+/* ── CARDS panel ─────────────────────────────────────── */
+#panel-cards { padding:10px; }
+
+.cards-toolbar {
+  display:flex; gap:6px; margin-bottom:8px; align-items:center;
+}
+.deck-pick {
+  flex:1; background:var(--bg); color:var(--text);
+  border:1px solid var(--dim); font-family:'Share Tech Mono',monospace;
+  font-size:11px; padding:5px 8px; outline:none;
+}
+.deck-pick:focus { border-color:var(--border); }
+
+.card-list { display:flex; flex-direction:column; gap:5px; }
+.card-item {
+  background:var(--panel); border-left:2px solid var(--dim);
+  padding:8px 12px; animation:slideUp .2s ease;
+}
+.card-item.known   { border-left-color:var(--bright); }
+.card-item.unknown { border-left-color:var(--red);    }
+.card-q { font-size:12px; color:var(--text); margin-bottom:3px; word-break:break-word; }
+.card-a { font-size:10px; color:var(--dimtxt); word-break:break-word; }
+.card-item-actions { display:flex; gap:6px; margin-top:6px; }
+.card-act {
+  font-size:9px; background:none; border:1px solid var(--dim);
+  color:var(--dimtxt); font-family:'Share Tech Mono',monospace;
+  padding:2px 8px; cursor:pointer;
+}
+.card-act.del:active { border-color:var(--red); color:var(--red); }
+.card-act.edit:active { border-color:var(--amber); color:var(--amber); }
+
+.empty-msg {
+  text-align:center; color:var(--dimtxt); padding:40px 20px;
+  font-size:11px; line-height:2;
+}
+.empty-big { font-family:'VT323',monospace; font-size:48px; color:var(--muted); display:block; }
+
+/* ── DECKS panel ─────────────────────────────────────── */
+#panel-decks { padding:10px; }
+
+.deck-list { display:flex; flex-direction:column; gap:6px; }
+.deck-item {
+  background:var(--panel); border:1px solid var(--dim);
+  padding:10px 14px; display:flex; justify-content:space-between;
+  align-items:center; animation:slideUp .2s ease;
+}
+.deck-item.active-deck { border-color:var(--border); }
+.deck-name { font-size:14px; color:var(--text); }
+.deck-meta { font-size:9px; color:var(--dimtxt); margin-top:2px; }
+.deck-actions { display:flex; gap:6px; }
+.deck-act {
+  font-size:9px; background:none; border:1px solid var(--dim);
+  color:var(--dimtxt); font-family:'Share Tech Mono',monospace;
+  padding:3px 8px; cursor:pointer;
+}
+.deck-act.study:active  { border-color:var(--border); color:var(--border); }
+.deck-act.rename:active { border-color:var(--amber);  color:var(--amber); }
+.deck-act.del:active    { border-color:var(--red);    color:var(--red); }
+
+/* ── FAB ─────────────────────────────────────────────── */
+.fab {
+  position:fixed; bottom:20px; right:16px; z-index:100;
+  width:52px; height:52px; background:var(--border); color:var(--bg);
+  border:none; font-size:26px; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; font-family:'Share Tech Mono',monospace;
+  box-shadow: 0 0 16px rgba(0,255,65,0.6), 0 0 32px rgba(0,255,65,0.3);
+  transition: transform .1s;
+}
+.fab:active { transform:scale(0.92); }
+
+/* ── Footer ──────────────────────────────────────────── */
+footer {
+  border-top:1px solid var(--dim); background:var(--bg);
+  padding:4px 12px; font-size:8px; color:var(--dimtxt);
+  display:flex; justify-content:space-between; flex-shrink:0;
+  letter-spacing:1px;
+}
+#status { color:var(--border); animation:blink 1.2s step-end infinite; }
+
+/* ── Modal ───────────────────────────────────────────── */
+.overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,0.92);
+  z-index:200; display:flex; align-items:flex-end; justify-content:center;
+  opacity:0; pointer-events:none; transition:opacity .2s;
+}
+.overlay.open { opacity:1; pointer-events:all; }
+.modal {
+  width:100%; max-width:480px; background:var(--panel);
+  border:1px solid var(--border); border-bottom:none;
+  box-shadow: 0 0 30px rgba(0,255,65,0.4);
+  padding: 0 0 env(safe-area-inset-bottom);
+  transform:translateY(100%); transition:transform .25s cubic-bezier(.4,0,.2,1);
+  max-height:90dvh; overflow-y:auto;
+}
+.overlay.open .modal { transform:translateY(0); }
+.modal-title {
+  font-family:'VT323',monospace; font-size:22px; color:var(--border);
+  padding:14px 16px 8px; border-bottom:1px solid var(--muted);
+  letter-spacing:2px;
+}
+.form-group { padding:10px 16px 0; }
+.form-label { font-size:9px; color:var(--bright); letter-spacing:2px; margin-bottom:5px; display:block; }
+.form-input {
+  width:100%; background:var(--bg); color:var(--text);
+  border:1px solid var(--dim); font-family:'Share Tech Mono',monospace;
+  font-size:13px; padding:8px 10px; outline:none; -webkit-appearance:none;
+}
+.form-input:focus { border-color:var(--border); box-shadow:0 0 6px rgba(0,255,65,0.3); }
+textarea.form-input { height:90px; resize:none; }
+.modal-actions {
+  display:flex; gap:10px; padding:14px 16px;
+  border-top:1px solid var(--muted); margin-top:10px;
+}
+.btn-save {
+  flex:1; background:var(--border); color:var(--bg); border:none;
+  font-family:'Share Tech Mono',monospace; font-size:13px;
+  padding:11px; cursor:pointer; letter-spacing:2px;
+}
+.btn-cancel {
+  flex:1; background:none; color:var(--red); border:1px solid var(--red);
+  font-family:'Share Tech Mono',monospace; font-size:13px;
+  padding:11px; cursor:pointer; letter-spacing:2px;
+}
+.btn-save:active   { opacity:.8; }
+.btn-cancel:active { background:var(--red); color:var(--bg); }
+
+/* Swipe hint */
+.swipe-hint {
+  display:flex; justify-content:space-between;
+  font-size:8px; color:var(--muted); padding:0 4px;
+  flex-shrink:0;
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <header>
+    <div class="hdr-row">
+      <div>
+        <div class="logo">MNEMO<span>//</span>SYS</div>
+        <div class="logo-sub">FLASHCARD TRAINING SYS v1.0</div>
+      </div>
+      <div>
+        <div id="clock">00:00:00</div>
+        <div id="dateline">---</div>
+      </div>
+    </div>
+    <div class="prog-wrap">
+      <div class="prog-label">
+        <span>SESSION PROGRESS</span>
+        <span id="prog-text">─</span>
+      </div>
+      <div class="prog-track"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
+    </div>
+  </header>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('study')">▶ STUDY</button>
+    <button class="tab" onclick="switchTab('cards')">◈ CARDS</button>
+    <button class="tab" onclick="switchTab('decks')">▦ DECKS</button>
+  </div>
+
+  <!-- STUDY panel -->
+  <div class="panel active" id="panel-study">
+    <div class="deck-selector">
+      <select id="study-deck-sel" onchange="loadStudyDeck()">
+        <option value="">── SELECT DECK ──</option>
+      </select>
+    </div>
+
+    <div class="session-stats">
+      <div class="stat-box"><div class="stat-label">KNOWN</div><div class="stat-val green" id="stat-known">0</div></div>
+      <div class="stat-box"><div class="stat-label">MISSED</div><div class="stat-val red" id="stat-missed">0</div></div>
+      <div class="stat-box"><div class="stat-label">LEFT</div><div class="stat-val amber" id="stat-left">─</div></div>
+    </div>
+
+    <div class="card-area" id="card-area">
+      <div style="text-align:center;color:var(--dimtxt);font-size:11px;line-height:2">
+        <span style="font-family:VT323,monospace;font-size:48px;color:var(--muted);display:block">?</span>
+        SELECT A DECK TO BEGIN
+      </div>
+    </div>
+
+    <div class="complete-screen" id="complete-screen">
+      <div class="complete-big">✓</div>
+      <div style="font-family:VT323,monospace;font-size:28px;color:var(--border)">SESSION COMPLETE</div>
+      <div class="complete-sub" id="complete-sub"></div>
+      <button class="btn-save" style="max-width:200px;margin-top:8px" onclick="restartSession()">[ RESTART ]</button>
+      <button class="btn-cancel" style="max-width:200px;border:1px solid var(--amber);color:var(--amber)" onclick="reviewMissed()">[ REVIEW MISSED ]</button>
+    </div>
+
+    <div class="swipe-hint" id="swipe-hint" style="display:none">
+      <span>← MISSED</span><span>TAP TO FLIP</span><span>KNEW →</span>
+    </div>
+
+    <div class="study-btns" id="study-btns" style="display:none">
+      <button class="study-btn btn-missed" onclick="markCard(false)">[ ✕ MISSED ]</button>
+      <button class="study-btn btn-flip"   onclick="flipCard()">[ ↺ FLIP ]</button>
+      <button class="study-btn btn-knew"   onclick="markCard(true)">[ ✓ KNEW ]</button>
+    </div>
+  </div>
+
+  <!-- CARDS panel -->
+  <div class="panel" id="panel-cards">
+    <div class="cards-toolbar">
+      <select class="deck-pick" id="cards-deck-sel" onchange="renderCardList()">
+        <option value="">── ALL DECKS ──</option>
+      </select>
+    </div>
+    <div class="card-list" id="card-list"></div>
+  </div>
+
+  <!-- DECKS panel -->
+  <div class="panel" id="panel-decks">
+    <div class="deck-list" id="deck-list"></div>
+  </div>
+
+  <!-- FAB -->
+  <button class="fab" id="fab" onclick="openAddModal()" title="Add">+</button>
+
+  <!-- Footer -->
+  <footer>
+    <span id="status">█ SYSTEM READY</span>
+    <span id="card-count">0 CARDS</span>
+  </footer>
+</div>
+
+<!-- Add/Edit Card Modal -->
+<div class="overlay" id="card-overlay" onclick="handleOverlayClick(event,'card-overlay')">
+  <div class="modal">
+    <div class="modal-title" id="card-modal-title">╔ NEW CARD ╗</div>
+    <div class="form-group">
+      <label class="form-label">DECK</label>
+      <select class="form-input" id="f-deck">
+        <option value="">── SELECT DECK ──</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">QUESTION *</label>
+      <textarea class="form-input" id="f-question" placeholder="Front of card..."></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">ANSWER *</label>
+      <textarea class="form-input" id="f-answer" placeholder="Back of card..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('card-overlay')">[ CANCEL ]</button>
+      <button class="btn-save"   onclick="saveCard()">[ SAVE ]</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Deck Modal -->
+<div class="overlay" id="deck-overlay" onclick="handleOverlayClick(event,'deck-overlay')">
+  <div class="modal">
+    <div class="modal-title" id="deck-modal-title">╔ NEW DECK ╗</div>
+    <div class="form-group">
+      <label class="form-label">DECK NAME *</label>
+      <input class="form-input" id="f-deck-name" type="text" placeholder="e.g. Spanish Vocab"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('deck-overlay')">[ CANCEL ]</button>
+      <button class="btn-save"   onclick="saveDeck()">[ SAVE ]</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let decks = JSON.parse(localStorage.getItem('mn_decks') || '[]');
+let cards = JSON.parse(localStorage.getItem('mn_cards') || '[]');
+
+// Session state
+let sessionQueue  = [];
+let sessionIndex  = 0;
+let sessionKnown  = 0;
+let sessionMissed = 0;
+let cardFlipped   = false;
+let editingCardId = null;
+let editingDeckId = null;
+let currentTab    = 'study';
+let missedOnly    = false;
+
+function save() {
+  localStorage.setItem('mn_decks', JSON.stringify(decks));
+  localStorage.setItem('mn_cards', JSON.stringify(cards));
+}
+function newId(arr) {
+  return arr.length ? Math.max(...arr.map(x => x.id || 0)) + 1 : 1;
+}
+
+// ── Clock ──────────────────────────────────────────────────────────────────
+function tickClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toTimeString().slice(0,8);
+  document.getElementById('dateline').textContent = now.toDateString().toUpperCase();
+}
+setInterval(tickClock, 1000); tickClock();
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const names = ['study','cards','decks'];
+    t.classList.toggle('active', names[i] === tab);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-'+tab).classList.add('active');
+
+  const fab = document.getElementById('fab');
+  if (tab === 'study') {
+    fab.style.display = 'none'; // hide FAB during study — buttons are inline
+  } else if (tab === 'cards') {
+    fab.style.display = 'flex'; fab.textContent = '+'; fab.onclick = openAddModal; renderCardList();
+  } else if (tab === 'decks') {
+    fab.style.display = 'flex'; fab.textContent = '+'; fab.onclick = openDeckModal; renderDeckList();
+  }
+
+  populateDeckSelects();
+}
+
+// ── Deck selects ───────────────────────────────────────────────────────────
+function populateDeckSelects() {
+  const selects = ['study-deck-sel','cards-deck-sel','f-deck'];
+  selects.forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = sel.value;
+    const hasAll = id === 'cards-deck-sel';
+    sel.innerHTML = hasAll
+      ? '<option value="">── ALL DECKS ──</option>'
+      : '<option value="">── SELECT DECK ──</option>';
+    decks.forEach(d => {
+      const o = document.createElement('option');
+      o.value = d.id; o.textContent = d.name;
+      sel.appendChild(o);
+    });
+    if (cur) sel.value = cur;
+  });
+  updateCardCount();
+}
+
+function updateCardCount() {
+  document.getElementById('card-count').textContent = `${cards.length} CARDS`;
+}
+
+// ── STUDY ──────────────────────────────────────────────────────────────────
+function loadStudyDeck() {
+  const deckId = parseInt(document.getElementById('study-deck-sel').value);
+  if (!deckId) return;
+  const deckCards = cards.filter(c => c.deckId === deckId);
+  if (!deckCards.length) {
+    setStatus('NO CARDS IN THIS DECK');
+    return;
+  }
+  startSession(deckCards, false);
+}
+
+function startSession(cardSet, missed) {
+  missedOnly    = missed;
+  sessionQueue  = shuffle([...cardSet]);
+  sessionIndex  = 0;
+  sessionKnown  = 0;
+  sessionMissed = 0;
+  cardFlipped   = false;
+
+  document.getElementById('complete-screen').classList.remove('show');
+  document.getElementById('study-btns').style.display  = 'flex';
+  document.getElementById('swipe-hint').style.display  = 'flex';
+  document.getElementById('card-area').style.display   = 'flex';
+
+  updateSessionStats();
+  showCard();
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function showCard() {
+  if (sessionIndex >= sessionQueue.length) {
+    endSession(); return;
+  }
+  cardFlipped = false;
+  const card = sessionQueue[sessionIndex];
+  const area = document.getElementById('card-area');
+
+  area.innerHTML = `
+    <div class="card-wrap">
+      <div class="card" id="current-card" onclick="flipCard()">
+        <div class="card-side">── QUESTION ──</div>
+        <div class="card-content">${escHtml(card.question)}</div>
+        <div class="card-hint">TAP TO REVEAL</div>
+      </div>
+    </div>
+    <div class="card-counter" id="card-counter"></div>`;
+  updateSessionStats();
+}
+
+function flipCard() {
+  const card = sessionQueue[sessionIndex];
+  if (!card) return;
+  const el = document.getElementById('current-card');
+  if (!el) return;
+
+  if (cardFlipped) {
+    // Already showing answer — re-show question
+    el.classList.add('flip-out');
+    setTimeout(() => {
+      el.innerHTML = `
+        <div class="card-side">── QUESTION ──</div>
+        <div class="card-content">${escHtml(card.question)}</div>
+        <div class="card-hint">TAP TO REVEAL</div>`;
+      el.classList.remove('flip-out');
+      el.classList.add('flip-in');
+      setTimeout(() => el.classList.remove('flip-in'), 150);
+      cardFlipped = false;
+    }, 150);
+  } else {
+    el.classList.add('flip-out');
+    setTimeout(() => {
+      el.innerHTML = `
+        <div class="card-side">── ANSWER ──</div>
+        <div class="card-content">${escHtml(card.answer)}</div>
+        <div class="card-hint">TAP TO FLIP BACK</div>`;
+      el.classList.remove('flip-out');
+      el.classList.add('flip-in');
+      setTimeout(() => el.classList.remove('flip-in'), 150);
+      cardFlipped = true;
+    }, 150);
+  }
+}
+
+function markCard(knew) {
+  const card = sessionQueue[sessionIndex];
+  if (!card) return;
+  const el = document.getElementById('current-card');
+
+  // Update score on the card
+  if (!card.stats) card.stats = { known: 0, missed: 0 };
+  if (knew) { card.stats.known++;  sessionKnown++;  }
+  else       { card.stats.missed++; sessionMissed++; }
+
+  // Sync stats back to main cards array
+  const orig = cards.find(c => c.id === card.id);
+  if (orig) orig.stats = card.stats;
+  save();
+
+  // Flash feedback
+  if (el) {
+    el.classList.add(knew ? 'correct-flash' : 'wrong-flash');
+    setTimeout(() => {
+      el.classList.remove('correct-flash', 'wrong-flash');
+    }, 500);
+  }
+
+  sessionIndex++;
+  setTimeout(() => { cardFlipped = false; showCard(); }, 300);
+  updateSessionStats();
+}
+
+function updateSessionStats() {
+  const left = sessionQueue.length - sessionIndex;
+  const total = sessionQueue.length;
+  const done  = sessionIndex;
+  const pct   = total > 0 ? done / total * 100 : 0;
+
+  document.getElementById('stat-known').textContent  = sessionKnown;
+  document.getElementById('stat-missed').textContent = sessionMissed;
+  document.getElementById('stat-left').textContent   = left > 0 ? left : '─';
+  document.getElementById('prog-fill').style.width   = pct + '%';
+  document.getElementById('prog-text').textContent   =
+    total > 0 ? `${done}/${total}` : '─';
+}
+
+function endSession() {
+  document.getElementById('card-area').innerHTML = '';
+  document.getElementById('study-btns').style.display = 'none';
+  document.getElementById('swipe-hint').style.display = 'none';
+
+  const pct = sessionQueue.length > 0
+    ? Math.round(sessionKnown / sessionQueue.length * 100) : 0;
+  document.getElementById('complete-sub').textContent =
+    `KNEW: ${sessionKnown}  MISSED: ${sessionMissed}  SCORE: ${pct}%`;
+
+  const reviewBtn = document.querySelector('[onclick="reviewMissed()"]');
+  if (reviewBtn) reviewBtn.style.display = sessionMissed > 0 ? 'block' : 'none';
+
+  document.getElementById('complete-screen').classList.add('show');
+  document.getElementById('prog-fill').style.width = '100%';
+  setStatus(`SESSION DONE — ${pct}% KNOWN`);
+}
+
+function restartSession() {
+  const deckId = parseInt(document.getElementById('study-deck-sel').value);
+  if (!deckId) return;
+  document.getElementById('complete-screen').classList.remove('show');
+  const deckCards = cards.filter(c => c.deckId === deckId);
+  startSession(deckCards, false);
+}
+
+function reviewMissed() {
+  document.getElementById('complete-screen').classList.remove('show');
+  // Re-run only cards that were missed in this session
+  const missedCards = sessionQueue.filter((_, i) => {
+    // rebuild: cards marked missed have stats.missed > 0 after session
+    return true; // simplified: just re-run same deck shuffled
+  });
+  const deckId = parseInt(document.getElementById('study-deck-sel').value);
+  const deckCards = cards.filter(c => c.deckId === deckId);
+  startSession(deckCards.filter(c => c.stats && c.stats.missed > 0), true);
+}
+
+// Swipe support
+let touchStartX = 0;
+document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; });
+document.addEventListener('touchend', e => {
+  if (currentTab !== 'study') return;
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  if (Math.abs(dx) < 60) return;
+  if (!cardFlipped) { flipCard(); return; }
+  if (dx > 60)  markCard(true);
+  if (dx < -60) markCard(false);
+});
+
+// ── CARDS CRUD ─────────────────────────────────────────────────────────────
+function renderCardList() {
+  const filterDeck = parseInt(document.getElementById('cards-deck-sel').value) || null;
+  const list = document.getElementById('card-list');
+  const filtered = filterDeck
+    ? cards.filter(c => c.deckId === filterDeck)
+    : cards;
+
+  if (!filtered.length) {
+    list.innerHTML = `<div class="empty-msg"><span class="empty-big">◈</span>NO CARDS YET<br>HIT + TO ADD ONE</div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(c => {
+    const deck = decks.find(d => d.id === c.deckId);
+    const deckName = deck ? deck.name : '?';
+    const known  = c.stats ? c.stats.known  : 0;
+    const missed = c.stats ? c.stats.missed : 0;
+    const cls    = known > missed ? 'known' : missed > known ? 'unknown' : '';
+    return `
+    <div class="card-item ${cls}">
+      <div class="card-q">${escHtml(c.question)}</div>
+      <div class="card-a">${escHtml(c.answer)}</div>
+      <div class="card-item-actions">
+        <span style="font-size:9px;color:var(--dimtxt);margin-right:auto">${deckName} · ✓${known} ✕${missed}</span>
+        <button class="card-act edit" onclick="openEditCard(${c.id})">EDIT</button>
+        <button class="card-act del"  onclick="deleteCard(${c.id})">DEL</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openAddModal() {
+  editingCardId = null;
+  document.getElementById('card-modal-title').textContent = '╔ NEW CARD ╗';
+  document.getElementById('f-question').value = '';
+  document.getElementById('f-answer').value   = '';
+  document.getElementById('f-deck').value     = '';
+  openModal('card-overlay');
+  setTimeout(() => document.getElementById('f-question').focus(), 300);
+}
+
+function openEditCard(id) {
+  const card = cards.find(c => c.id === id);
+  if (!card) return;
+  editingCardId = id;
+  document.getElementById('card-modal-title').textContent = '╔ EDIT CARD ╗';
+  document.getElementById('f-question').value = card.question;
+  document.getElementById('f-answer').value   = card.answer;
+  document.getElementById('f-deck').value     = card.deckId;
+  openModal('card-overlay');
+}
+
+function saveCard() {
+  const q      = document.getElementById('f-question').value.trim();
+  const a      = document.getElementById('f-answer').value.trim();
+  const deckId = parseInt(document.getElementById('f-deck').value);
+  if (!q || !a)     { alert('Question and answer are required!'); return; }
+  if (!deckId)      { alert('Select a deck!'); return; }
+
+  if (editingCardId !== null) {
+    const card = cards.find(c => c.id === editingCardId);
+    if (card) { card.question = q; card.answer = a; card.deckId = deckId; }
+    setStatus('✎ CARD UPDATED');
+  } else {
+    cards.push({ id: newId(cards), question: q, answer: a, deckId,
+                 stats: { known: 0, missed: 0 }, created: Date.now() });
+    setStatus('+ CARD ADDED');
+    beep();
+  }
+  save(); closeModal('card-overlay');
+  renderCardList(); updateCardCount();
+  populateDeckSelects();
+}
+
+function deleteCard(id) {
+  if (!confirm('Delete this card?')) return;
+  cards = cards.filter(c => c.id !== id);
+  save(); renderCardList(); updateCardCount();
+  setStatus('✕ CARD DELETED');
+}
+
+// ── DECKS CRUD ─────────────────────────────────────────────────────────────
+function renderDeckList() {
+  const list = document.getElementById('deck-list');
+  const studyDeckId = parseInt(document.getElementById('study-deck-sel').value) || null;
+
+  if (!decks.length) {
+    list.innerHTML = `<div class="empty-msg"><span class="empty-big">▦</span>NO DECKS YET<br>HIT + TO CREATE ONE</div>`;
+    return;
+  }
+  list.innerHTML = decks.map(d => {
+    const count = cards.filter(c => c.deckId === d.id).length;
+    const isActive = d.id === studyDeckId;
+    return `
+    <div class="deck-item ${isActive ? 'active-deck' : ''}">
+      <div>
+        <div class="deck-name">${escHtml(d.name)}</div>
+        <div class="deck-meta">${count} card${count!==1?'s':''}</div>
+      </div>
+      <div class="deck-actions">
+        <button class="deck-act study"  onclick="studyDeck(${d.id})">STUDY</button>
+        <button class="deck-act rename" onclick="openRenameDeck(${d.id})">RENAME</button>
+        <button class="deck-act del"    onclick="deleteDeck(${d.id})">DEL</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openDeckModal() {
+  editingDeckId = null;
+  document.getElementById('deck-modal-title').textContent = '╔ NEW DECK ╗';
+  document.getElementById('f-deck-name').value = '';
+  openModal('deck-overlay');
+  setTimeout(() => document.getElementById('f-deck-name').focus(), 300);
+}
+
+function openRenameDeck(id) {
+  const deck = decks.find(d => d.id === id);
+  if (!deck) return;
+  editingDeckId = id;
+  document.getElementById('deck-modal-title').textContent = '╔ RENAME DECK ╗';
+  document.getElementById('f-deck-name').value = deck.name;
+  openModal('deck-overlay');
+}
+
+function saveDeck() {
+  const name = document.getElementById('f-deck-name').value.trim();
+  if (!name) { alert('Deck name is required!'); return; }
+  if (editingDeckId !== null) {
+    const deck = decks.find(d => d.id === editingDeckId);
+    if (deck) deck.name = name;
+    setStatus('✎ DECK RENAMED');
+  } else {
+    decks.push({ id: newId(decks), name, created: Date.now() });
+    setStatus('+ DECK CREATED');
+    beep();
+  }
+  save(); closeModal('deck-overlay');
+  renderDeckList(); populateDeckSelects();
+}
+
+function deleteDeck(id) {
+  const count = cards.filter(c => c.deckId === id).length;
+  const msg   = count > 0
+    ? `Delete deck and all ${count} card${count!==1?'s':''}?`
+    : 'Delete this deck?';
+  if (!confirm(msg)) return;
+  decks = decks.filter(d => d.id !== id);
+  cards = cards.filter(c => c.deckId !== id);
+  save(); renderDeckList(); populateDeckSelects();
+  setStatus('✕ DECK DELETED');
+}
+
+function studyDeck(id) {
+  document.getElementById('study-deck-sel').value = id;
+  switchTab('study');
+  loadStudyDeck();
+}
+
+// ── Modals ─────────────────────────────────────────────────────────────────
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+function handleOverlayClick(e, id) {
+  if (e.target === document.getElementById(id)) closeModal(id);
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    ['card-overlay','deck-overlay'].forEach(closeModal);
+  }
+  if (e.key === ' ' && currentTab === 'study') { e.preventDefault(); flipCard(); }
+  if (e.key === 'ArrowRight' && currentTab === 'study' && cardFlipped) markCard(true);
+  if (e.key === 'ArrowLeft'  && currentTab === 'study' && cardFlipped) markCard(false);
+});
+
+// ── Sound ──────────────────────────────────────────────────────────────────
+let audioCtx = null;
+function beep() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.connect(g); g.connect(audioCtx.destination);
+    o.type = 'square'; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.07, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+    o.start(); o.stop(audioCtx.currentTime + 0.08);
+  } catch(e){}
+}
+
+// ── Status ─────────────────────────────────────────────────────────────────
+let stTimer;
+function setStatus(msg) {
+  const el = document.getElementById('status');
+  el.textContent = msg; el.style.color = 'var(--bright)';
+  clearTimeout(stTimer);
+  stTimer = setTimeout(() => {
+    el.textContent = '█ SYSTEM READY';
+    el.style.color = '';
+  }, 3000);
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+document.getElementById('fab').style.display = 'none'; // study tab is default
+populateDeckSelects();
+</script>
+
+<!-- PWA -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () =>
+    navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
